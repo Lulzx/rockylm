@@ -14,9 +14,8 @@ Run (in the venv that has tiny-tts + the fairseq-free RVC deps):
 Env: ROCKY_VOICE_PORT=8770, ROCKY_RVC_MODEL=~/rvc/models/rocky_voice.pth,
      ROCKY_RVC_TRANSPOSE=0, TINYTTS_SPEAKER=MALE
 """
+import glob
 import os
-import re
-import subprocess
 import sys
 import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -29,18 +28,26 @@ MODEL = os.path.expanduser(os.environ.get("ROCKY_RVC_MODEL", "~/rvc/models/rocky
 TRANSPOSE = int(os.environ.get("ROCKY_RVC_TRANSPOSE", "0"))
 SPEAKER = os.environ.get("TINYTTS_SPEAKER", "MALE")
 
+_TTS = None
+
+
+def tts_engine():
+    """TinyTTS loaded once and kept warm (avoids per-call torch import)."""
+    global _TTS
+    if _TTS is None:
+        from tiny_tts import TinyTTS
+        _TTS = TinyTTS(device="cpu")
+    return _TTS
+
 
 def tinytts(text, out_wav):
-    """Generate base speech with TinyTTS. Returns path or None."""
-    r = subprocess.run(
-        ["tiny-tts", "-t", text, "-o", "base.wav", "-s", SPEAKER, "--device", "cpu"],
-        capture_output=True, text=True,
-    )
-    m = re.search(r"Saved audio to (.+\.wav)", r.stdout + r.stderr)
-    if not m or not os.path.exists(m.group(1).strip()):
-        return None
-    os.replace(m.group(1).strip(), out_wav)
-    return out_wav
+    """Generate base speech with TinyTTS (in-process). Returns path or None."""
+    tts_engine().speak(text, output_path=out_wav, speaker=SPEAKER)
+    if os.path.exists(out_wav):
+        return out_wav
+    # TinyTTS sometimes renames into ./infer_outputs/ — grab the newest
+    cand = sorted(glob.glob("infer_outputs/*.wav"), key=os.path.getmtime)
+    return cand[-1] if cand else None
 
 
 def say(text):
@@ -48,9 +55,10 @@ def say(text):
     base = tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name
     rocky = tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name
     try:
-        if tinytts(text, base) is None:
+        src = tinytts(text, base)
+        if src is None:
             return b""
-        rvc_infer.convert(base, rocky, MODEL, TRANSPOSE)
+        rvc_infer.convert(src, rocky, MODEL, TRANSPOSE)
         with open(rocky, "rb") as f:
             return f.read()
     finally:
@@ -97,6 +105,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     print(f"Loading Rocky voice models (TinyTTS + ContentVec + {os.path.basename(MODEL)})...", flush=True)
+    tts_engine()                # warm TinyTTS
     rvc_infer.load_net(MODEL)   # warm RVC synthesizer
     rvc_infer.hubert()          # warm ContentVec
     print(f"Rocky voice service on http://127.0.0.1:{PORT}  (POST /say, transpose={TRANSPOSE})", flush=True)
