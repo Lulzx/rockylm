@@ -149,13 +149,35 @@ async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+def load_dotenv(path):
+    """Minimal .env loader so `python bot/rocky_bot.py` just works."""
+    if os.path.exists(path):
+        for line in open(path):
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip())
+
+
 def main():
+    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
         print("Set TELEGRAM_BOT_TOKEN (from @BotFather) first.", file=sys.stderr)
         sys.exit(1)
     engine()  # fail fast if no checkpoint
-    app = Application.builder().token(token).build()
+
+    builder = Application.builder().token(token)
+    # Telegram is blocked on some networks (e.g. India). Route through a proxy
+    # you trust if provided — needed for both polling and sending. Supports
+    # http(s):// and socks5:// (socks needs: pip install "httpx[socks]").
+    proxy = (os.environ.get("TELEGRAM_PROXY") or os.environ.get("ALL_PROXY")
+             or os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy"))
+    if proxy:
+        builder = builder.proxy(proxy).get_updates_proxy(proxy)
+        print(f"Using proxy for Telegram: {proxy}")
+
+    app = builder.build()
     app.add_handler(CommandHandler("start", on_start))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, on_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
