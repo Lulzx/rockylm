@@ -82,8 +82,13 @@ def transcribe(audio_path):
     return " ".join(seg.text for seg in segments).strip()
 
 
+# Lower temperature -> more consistent (on-brand) replies AND more repeats,
+# which means more voice-cache hits (instant audio).
+GEN_TEMP = float(os.environ.get("ROCKY_TEMP", "0.4"))
+
+
 def rocky_reply(text):
-    out = engine().chat_completion([{"role": "user", "content": text}])
+    out = engine().chat_completion([{"role": "user", "content": text}], temperature=GEN_TEMP)
     return out["choices"][0]["message"]["content"] or "..."
 
 
