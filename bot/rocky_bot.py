@@ -37,12 +37,14 @@ from telegram.ext import (Application, CommandHandler, ContextTypes,
                           MessageHandler, filters)
 
 from rockylm import tts
-from rockylm.inference import RockyInference
 
 CHECKPOINT = os.environ.get("ROCKY_CHECKPOINT", "checkpoints/best_model.pt")
 TOKENIZER = os.environ.get("ROCKY_TOKENIZER", "data/tokenizer.json")
 TTS_BACKEND = os.environ.get("ROCKY_TTS", "peon")
 WHISPER_SIZE = os.environ.get("WHISPER_MODEL", "base")
+# "pack" = reply ONLY with OpenPeon Rocky clips (text == voice, always matched).
+# "llm"  = generate text with RockyLM, then voice it via ROCKY_TTS.
+MODE = os.environ.get("ROCKY_MODE", "pack")
 
 # Lazily-initialised singletons (loaded once, reused across messages).
 _engine = None
@@ -57,6 +59,7 @@ def engine():
                 f"No model at {CHECKPOINT}. Train first:\n"
                 "  python -m rockylm prepare && python -m rockylm train"
             )
+        from rockylm.inference import RockyInference  # lazy: only needed in llm mode
         _engine = RockyInference(CHECKPOINT, TOKENIZER, device="cpu")
     return _engine
 
@@ -82,17 +85,11 @@ def rocky_reply(text):
     return out["choices"][0]["message"]["content"] or "..."
 
 
-def to_voice_ogg(reply_text):
-    """Produce an OGG/Opus voice note of Rocky for `reply_text`. Returns path or None."""
-    wav = None
-    if TTS_BACKEND == "xtts":
-        wav = tts.synth_xtts(reply_text, verbose=False)
-    if wav is None:  # peon (default) or xtts fallback
-        wav, _label, _ev = tts.clip_for(text=reply_text)
+def wav_to_ogg(wav):
+    """Convert a WAV to an OGG/Opus voice note (what Telegram wants). Path or None."""
     if not wav or not os.path.exists(wav):
         return None
     ogg = tempfile.NamedTemporaryFile(suffix=".ogg", delete=False).name
-    # Telegram voice notes must be OGG/Opus
     r = subprocess.run(
         ["ffmpeg", "-y", "-i", wav, "-c:a", "libopus", "-b:a", "32k", ogg],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -100,25 +97,50 @@ def to_voice_ogg(reply_text):
     return ogg if r.returncode == 0 else None
 
 
+def pack_reply(text):
+    """Pack-only reply: the single best OpenPeon Rocky clip for `text`.
+    Returns (label, ogg_path) — the label IS the spoken line, so text == voice."""
+    wav, label, _ev = tts.clip_for(text=text)
+    return label, wav_to_ogg(wav)
+
+
+def to_voice_ogg(reply_text):
+    """LLM-mode voicing: synth/clip for arbitrary reply text. Path or None."""
+    wav = tts.synth_xtts(reply_text, verbose=False) if TTS_BACKEND == "xtts" else None
+    if wav is None:
+        wav, _label, _ev = tts.clip_for(text=reply_text)
+    return wav_to_ogg(wav)
+
+
 # ── handlers ─────────────────────────────────────────────────────────────────
 
-async def respond(update: Update, user_text: str):
-    chat = update.effective_chat
-    await chat.send_action(ChatAction.TYPING)
-    reply = await asyncio.to_thread(rocky_reply, user_text)
-
-    # 1) text
-    await update.message.reply_text(reply)
-
-    # 2) voice
-    await chat.send_action(ChatAction.RECORD_VOICE)
-    ogg = await asyncio.to_thread(to_voice_ogg, reply)
+async def _send_voice(update, ogg):
     if ogg:
         try:
             with open(ogg, "rb") as f:
                 await update.message.reply_voice(voice=f)
         finally:
             os.unlink(ogg)
+
+
+async def respond(update: Update, user_text: str):
+    chat = update.effective_chat
+
+    if MODE == "pack":
+        # text and voice come from the SAME clip -> always matched
+        await chat.send_action(ChatAction.RECORD_VOICE)
+        label, ogg = await asyncio.to_thread(pack_reply, user_text)
+        await update.message.reply_text(label)
+        await _send_voice(update, ogg)
+        return
+
+    # llm mode: RockyLM text, then voice it
+    await chat.send_action(ChatAction.TYPING)
+    reply = await asyncio.to_thread(rocky_reply, user_text)
+    await update.message.reply_text(reply)
+    await chat.send_action(ChatAction.RECORD_VOICE)
+    ogg = await asyncio.to_thread(to_voice_ogg, reply)
+    await _send_voice(update, ogg)
 
 
 async def on_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -165,7 +187,10 @@ def main():
     if not token:
         print("Set TELEGRAM_BOT_TOKEN (from @BotFather) first.", file=sys.stderr)
         sys.exit(1)
-    engine()  # fail fast if no checkpoint
+    if MODE == "llm":
+        engine()  # fail fast if no checkpoint
+    else:
+        tts.ensure_pack(verbose=True)  # pre-download the OpenPeon clips
 
     builder = Application.builder().token(token)
     # Telegram is blocked on some networks (e.g. India). Route through a proxy
@@ -181,7 +206,8 @@ def main():
     app.add_handler(CommandHandler("start", on_start))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, on_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
-    print(f"Rocky bot running (tts={TTS_BACKEND}, whisper={WHISPER_SIZE}). Ctrl-C to stop.")
+    detail = "pack-only (OpenPeon clips)" if MODE == "pack" else f"llm + tts={TTS_BACKEND}"
+    print(f"Rocky bot running (mode={MODE}: {detail}, whisper={WHISPER_SIZE}). Ctrl-C to stop.")
     app.run_polling()
 
 
