@@ -1,0 +1,92 @@
+"""
+Fairseq-free RVC v2 inference.
+
+Converts a source WAV into the voice of an RVC .pth model (e.g. rocky_voice.pth)
+WITHOUT fairseq: the HuBERT/ContentVec content encoder is loaded via
+transformers (lengyue233/content-vec-best), pitch via torchcrepe. Runs on CPU.
+
+    python rvc_infer.py <input.wav> <output.wav> [model.pth] [transpose_semitones]
+"""
+import os
+import sys
+
+import librosa
+import numpy as np
+import soundfile as sf
+import torch
+import torch.nn.functional as F
+import torchcrepe
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from infer_pack.models import SynthesizerTrnMs768NSFsid
+from transformers import HubertModel
+
+DEVICE = "cpu"
+_HUBERT = None
+
+
+def hubert():
+    global _HUBERT
+    if _HUBERT is None:
+        _HUBERT = HubertModel.from_pretrained("lengyue233/content-vec-best")
+        _HUBERT.eval().to(DEVICE).float()
+    return _HUBERT
+
+
+_NET = {}
+
+
+def load_net(pth):
+    if pth not in _NET:
+        cpt = torch.load(pth, map_location="cpu", weights_only=False)
+        net = SynthesizerTrnMs768NSFsid(*cpt["config"], is_half=False)
+        net.load_state_dict(cpt["weight"], strict=False)
+        net.eval().to(DEVICE).float()
+        sr = cpt["sr"]
+        sr = {"32k": 32000, "40k": 40000, "48k": 48000}.get(sr, int(sr) if str(sr).isdigit() else 48000)
+        _NET[pth] = (net, sr)
+    return _NET[pth]
+
+
+def get_f0(audio16k, p_len, f0_up=0):
+    hop = 160  # 16k / 160 = 100 Hz frames (matches 2x-interpolated hubert feats)
+    wav = torch.tensor(audio16k, dtype=torch.float32).unsqueeze(0)
+    f0 = torchcrepe.predict(wav, 16000, hop, 50, 1100, "full",
+                            batch_size=512, device=DEVICE, pad=True)[0].cpu().numpy()
+    f0 = np.nan_to_num(f0) * (2 ** (f0_up / 12))
+    if len(f0) < p_len:
+        f0 = np.pad(f0, (0, p_len - len(f0)), mode="edge")
+    f0 = f0[:p_len]
+    f0_min, f0_max = 50.0, 1100.0
+    mel_min, mel_max = 1127 * np.log(1 + f0_min / 700), 1127 * np.log(1 + f0_max / 700)
+    f0_mel = 1127 * np.log(1 + f0 / 700)
+    f0_mel = np.where(f0_mel > 0, (f0_mel - mel_min) * 254 / (mel_max - mel_min) + 1, f0_mel)
+    coarse = np.rint(np.clip(f0_mel, 1, 255)).astype(np.int64)
+    return coarse, f0.astype(np.float32)
+
+
+def convert(src, dst, pth, transpose=0):
+    net, sr = load_net(pth)
+    audio, _ = librosa.load(src, sr=16000, mono=True)
+    feats = torch.tensor(audio, dtype=torch.float32).unsqueeze(0).to(DEVICE)
+    with torch.no_grad():
+        h = hubert()(feats, output_hidden_states=True).hidden_states[12]   # [1,T,768]
+        h = F.interpolate(h.permute(0, 2, 1), scale_factor=2).permute(0, 2, 1)
+        p_len = h.shape[1]
+        coarse, pitchf = get_f0(audio, p_len, transpose)
+        p_len = min(p_len, len(coarse))
+        h = h[:, :p_len].float()
+        pitch = torch.tensor(coarse[:p_len], dtype=torch.long).unsqueeze(0).to(DEVICE)
+        nsff0 = torch.tensor(pitchf[:p_len], dtype=torch.float32).unsqueeze(0).to(DEVICE)
+        lengths = torch.tensor([p_len], dtype=torch.long).to(DEVICE)
+        sid = torch.tensor([0], dtype=torch.long).to(DEVICE)
+        out = net.infer(h, lengths, pitch, nsff0, sid)[0][0, 0].cpu().numpy()
+    sf.write(dst, out, sr)
+    print(f"wrote {dst}  ({len(out)/sr:.2f}s @ {sr}Hz)")
+
+
+if __name__ == "__main__":
+    src, dst = sys.argv[1], sys.argv[2]
+    pth = sys.argv[3] if len(sys.argv) > 3 else os.path.expanduser("~/rvc/models/rocky_voice.pth")
+    tr = int(sys.argv[4]) if len(sys.argv) > 4 else 0
+    convert(src, dst, pth, tr)

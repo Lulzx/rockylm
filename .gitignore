@@ -58,3 +58,15 @@ Desktop.ini
 mac-companion/.build/
 *.swiftmodule
 .swiftpm/
+
+# RVC / TTS-train artifacts
+rvc/models/
+rvc/io/
+infer_outputs/
+tts-train/dataset/
+tts-train/cache/
+tts-train/runs/
+tts-train/*.ckpt
+tts-train/*.onnx
+tts-train/tinytts_base/
+tts-train/rvc_out/

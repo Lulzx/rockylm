@@ -45,6 +45,8 @@ WHISPER_SIZE = os.environ.get("WHISPER_MODEL", "base")
 # "pack" = reply ONLY with OpenPeon Rocky clips (text == voice, always matched).
 # "llm"  = generate text with RockyLM, then voice it via ROCKY_TTS.
 MODE = os.environ.get("ROCKY_MODE", "pack")
+# rvc voice service (TinyTTS -> RVC rocky_voice.pth); used when ROCKY_TTS=rvc
+ROCKY_VOICE_URL = os.environ.get("ROCKY_VOICE_URL", "http://127.0.0.1:8770")
 
 # Lazily-initialised singletons (loaded once, reused across messages).
 _engine = None
@@ -104,10 +106,33 @@ def pack_reply(text):
     return label, wav_to_ogg(wav)
 
 
+def rvc_voice(text):
+    """Ask the Rocky voice service (TinyTTS -> RVC) for a WAV. Returns path or None."""
+    import urllib.request
+    try:
+        req = urllib.request.Request(f"{ROCKY_VOICE_URL}/say", data=text.encode("utf-8"),
+                                     headers={"Content-Type": "text/plain"})
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            wav = resp.read()
+        if not wav:
+            return None
+        path = tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name
+        with open(path, "wb") as f:
+            f.write(wav)
+        return path
+    except Exception as e:
+        print(f"  rvc voice error: {e}")
+        return None
+
+
 def to_voice_ogg(reply_text):
-    """LLM-mode voicing: synth/clip for arbitrary reply text. Path or None."""
-    wav = tts.synth_xtts(reply_text, verbose=False) if TTS_BACKEND == "xtts" else None
-    if wav is None:
+    """LLM-mode voicing for arbitrary reply text. Path or None."""
+    wav = None
+    if TTS_BACKEND == "rvc":
+        wav = rvc_voice(reply_text)
+    elif TTS_BACKEND == "xtts":
+        wav = tts.synth_xtts(reply_text, verbose=False)
+    if wav is None:  # fall back to a recorded clip
         wav, _label, _ev = tts.clip_for(text=reply_text)
     return wav_to_ogg(wav)
 
