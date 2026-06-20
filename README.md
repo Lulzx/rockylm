@@ -118,6 +118,19 @@ python bot/rocky_bot.py
 
 See [`bot/README.md`](bot/README.md).
 
+## A floating Rocky on your Mac
+
+[`mac-companion/`](mac-companion/) is a pixel **Rocky** that walks your Dock
+line. Click him (or press Space), talk, and he answers in Rocky's voice with
+speech bubbles. He talks to RockyLM through the local [`relay/`](relay/) server
+(`/audio` voice in → Rocky voice out), so the same backend powers the bot, the
+companion, and any other client.
+
+```bash
+python relay/server.py                    # serve RockyLM at :8765
+cd mac-companion && ./fetch-sprites.sh && ./build.sh && ./.build/RockyCompanion
+```
+
 ---
 
 ## Giving Rocky a voice (TTS)
@@ -186,6 +199,8 @@ rockylm/
 ├── inference.py       ← chat (+ --speak)
 ├── config.py model.py dataset.py train.py prepare_data.py   ← unchanged recipe
 bot/                   ← Telegram bot: voice note → RockyLM → text + voice
+relay/                 ← HTTP server (/audio, /health) fronting RockyLM
+mac-companion/         ← floating pixel-Rocky macOS app (mic → relay → voice)
 docs/                  ← browser demo (ONNX + WASM), served on GitHub Pages
 STYLE.md               ← deep analysis of how Rocky talks (the spec)
 ```

@@ -166,14 +166,46 @@
   /* ── Loading ── */
   #loading {
     display: flex; flex-direction: column; align-items: center;
-    justify-content: center; flex: 1; gap: 16px; color: var(--dim);
+    justify-content: center; flex: 1; gap: 18px; color: var(--dim);
   }
-  #loading img { width: 80px; height: 80px; object-fit: contain; opacity: 0.8; }
-  #loading .spinner {
-    width: 32px; height: 32px; border: 3px solid var(--border);
-    border-top-color: var(--accent); border-radius: 50%;
-    animation: spin 0.8s linear infinite;
+  /* animated pixel Rocky: sprite frames swap via JS; bob + tiny hop while loading */
+  #rocky-sprite {
+    width: 112px; height: 112px; object-fit: contain;
+    image-rendering: pixelated;            /* keep the pixel art crisp */
+    filter: drop-shadow(0 6px 10px var(--logo-shadow));
+    animation: rocky-bob 0.9s ease-in-out infinite;
   }
+  @keyframes rocky-bob {
+    0%, 100% { transform: translateY(0) rotate(-1deg); }
+    50%      { transform: translateY(-8px) rotate(1deg); }
+  }
+  /* CSS fallback Rocky (if sprite images fail to load) */
+  #rocky-fallback {
+    width: 96px; height: 96px; display: none; position: relative;
+    animation: rocky-bob 0.9s ease-in-out infinite;
+  }
+  #rocky-fallback .rock {
+    width: 100%; height: 100%; border-radius: 26% 26% 32% 32%;
+    background: linear-gradient(150deg, #d98a3a, #a85d1f);
+    box-shadow: inset -8px -8px 0 rgba(0,0,0,0.18), inset 8px 8px 0 rgba(255,255,255,0.12);
+  }
+  #rocky-fallback .eye {
+    position: absolute; width: 12px; height: 12px; border-radius: 50%;
+    background: #0a1628; top: 38%;
+  }
+  #rocky-fallback .eye.l { left: 30%; } #rocky-fallback .eye.r { right: 30%; }
+  #load-stage { font-size: 13px; min-height: 18px; }
+  #load-stage b { color: var(--accent); }
+  #load-bar {
+    width: 240px; max-width: 70vw; height: 8px; border-radius: 6px;
+    background: var(--border); overflow: hidden;
+  }
+  #load-fill {
+    height: 100%; width: 0%; border-radius: 6px;
+    background: linear-gradient(90deg, var(--accent), #8b5cf6);
+    transition: width 0.25s ease;
+  }
+  #load-pct { font-size: 12px; font-variant-numeric: tabular-nums; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .hidden { display: none !important; }
 </style>
@@ -196,9 +228,11 @@
 </div>
 
 <div id="loading">
-  <img src="rocky.png" alt="Rocky" />
-  <div class="spinner"></div>
-  <div>downloading model &amp; tokenizer...</div>
+  <img id="rocky-sprite" alt="Rocky" />
+  <div id="rocky-fallback"><div class="rock"></div><span class="eye l"></span><span class="eye r"></span></div>
+  <div id="load-stage">waking rocky up...</div>
+  <div id="load-bar"><div id="load-fill"></div></div>
+  <div id="load-pct">0%</div>
   <div id="load-detail" style="font-size: 12px;"></div>
 </div>
 
@@ -274,21 +308,65 @@ import("https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/ort.min.mjs").t
   await load(ort);
 });
 
-// ── Load model + tokenizer ──────────────────────────────────────────
-async function load(ort) {
-  const detail = document.getElementById("load-detail");
+// ── Animated pixel Rocky loader ─────────────────────────────────────
+// Sprite frames are Rocky pixel art by agentrocky / rocky-relay (via jsDelivr).
+const SPRITE_BASE = "https://cdn.jsdelivr.net/gh/M-A-D-A-R-A/rocky-relay@main/mac-companion/RockyCompanion/Resources/Sprites";
+const SPRITE_FRAMES = ["jazz1", "jazz2", "jazz3", "jazz2"].map(n => `${SPRITE_BASE}/${n}.png`);
+let _spriteTimer = null;
+function startRockyAnim() {
+  const img = document.getElementById("rocky-sprite");
+  const fallback = document.getElementById("rocky-fallback");
+  img.onerror = () => { img.style.display = "none"; fallback.style.display = "block"; };
+  // preload then cycle frames ("Rocky jazzing while he loads")
+  let i = 0;
+  img.src = SPRITE_FRAMES[0];
+  _spriteTimer = setInterval(() => {
+    i = (i + 1) % SPRITE_FRAMES.length;
+    if (img.style.display !== "none") img.src = SPRITE_FRAMES[i];
+  }, 220);
+}
+function stopRockyAnim() { if (_spriteTimer) clearInterval(_spriteTimer); }
+function setStage(html) { document.getElementById("load-stage").innerHTML = html; }
+function setPct(p) {
+  const pct = Math.max(0, Math.min(100, Math.round(p * 100)));
+  document.getElementById("load-fill").style.width = pct + "%";
+  document.getElementById("load-pct").textContent = pct + "%";
+}
 
-  detail.textContent = "loading tokenizer...";
+// ── Load model + tokenizer (with real download progress) ────────────
+async function load(ort) {
+  startRockyAnim();
+
+  setStage("reading rocky words... <b>tokenizer</b>");
   const tokResp = await fetch(`${MODEL_BASE}/tokenizer.json`);
   const tokJson = await tokResp.json();
   tokenizer = buildTokenizer(tokJson);
+  setPct(0.04);
 
-  detail.textContent = "loading model (~10 MB)...";
+  // Stream the model so we can show a real percentage as bytes arrive.
+  setStage("bringing rocky brain... <b>model</b>");
   const modelResp = await fetch(`${MODEL_BASE}/model.onnx`);
-  const modelBuf = await modelResp.arrayBuffer();
+  const total = +modelResp.headers.get("Content-Length") || 8847654;
+  const reader = modelResp.body.getReader();
+  const chunks = [];
+  let received = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.length;
+    setPct(0.04 + 0.9 * (received / total));   // 4% .. 94% during download
+  }
+  const modelBuf = await new Blob(chunks).arrayBuffer();
+
+  setStage("waking rocky up... <b>webassembly</b>");
+  setPct(0.97);
   session = await ort.InferenceSession.create(modelBuf, {
     executionProviders: ["wasm"],
   });
+  setPct(1.0);
+  setStage("rocky here. good good good.");
+  stopRockyAnim();
 
   document.getElementById("loading").classList.add("hidden");
   document.getElementById("samples").classList.remove("hidden");

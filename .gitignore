@@ -53,3 +53,8 @@ Desktop.ini
 *.log
 *.tmp
 *.bak
+
+# Swift companion build artifacts
+mac-companion/.build/
+*.swiftmodule
+.swiftpm/
