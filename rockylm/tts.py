@@ -267,14 +267,24 @@ def play(path):
     return True
 
 
-def speak_peon(text=None, event=None, category=None, verbose=True):
-    """Speak as Rocky using a recorded pack clip. Returns the clip label."""
+def clip_for(text=None, event=None, category=None, verbose=False):
+    """Resolve the best Rocky clip WITHOUT playing it.
+
+    Returns (wav_path, label, event). Used by the Telegram bot to attach
+    Rocky's recorded voice to a reply.
+    """
     manifest = ensure_pack(verbose=verbose)
     ev, snd = pick_clip(manifest, text=text, event=event, category=category)
+    return _clip_path(snd), snd["label"], ev
+
+
+def speak_peon(text=None, event=None, category=None, verbose=True):
+    """Speak as Rocky using a recorded pack clip. Returns the clip label."""
+    path, label, ev = clip_for(text=text, event=event, category=category, verbose=verbose)
     if verbose:
-        print(f"  🔊 [{ev}] rocky: \"{snd['label']}\"", file=sys.stderr)
-    play(_clip_path(snd))
-    return snd["label"]
+        print(f"  🔊 [{ev}] rocky: \"{label}\"", file=sys.stderr)
+    play(path)
+    return label
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -289,27 +299,43 @@ def ensure_reference(verbose=True):
     return REFERENCE_PATH
 
 
-def speak_xtts(text, out_path=None, verbose=True):
-    """Synthesize `text` in Rocky's cloned voice via Coqui XTTS v2."""
+_XTTS = None
+
+
+def synth_xtts(text, out_path=None, verbose=True):
+    """Synthesize `text` to a wav file in Rocky's cloned voice. No playback.
+
+    Returns the wav path, or None if Coqui TTS is not installed.
+    """
+    global _XTTS
     try:
         from TTS.api import TTS
     except ImportError:
+        return None
+    reference = ensure_reference(verbose=verbose)
+    out_path = out_path or os.path.join(CACHE_DIR, "_rocky_say.wav")
+    if _XTTS is None:  # cache the model across calls (bot reuse)
+        if verbose:
+            print("Loading XTTS v2 (first call is slow)...", file=sys.stderr)
+        _XTTS = TTS("tts_models/multilingual/multi-dataset/xtts_v2")
+    _XTTS.tts_to_file(text=text, speaker_wav=reference, language="en", file_path=out_path)
+    return out_path
+
+
+def speak_xtts(text, out_path=None, verbose=True):
+    """Synthesize `text` in Rocky's cloned voice via Coqui XTTS v2, then play."""
+    if verbose:
+        print(f"  synthesizing: \"{text}\"", file=sys.stderr)
+    path = synth_xtts(text, out_path=out_path, verbose=verbose)
+    if path is None:
         print(
             "xtts backend needs Coqui TTS:  pip install TTS\n"
-            "Then it clones Rocky's voice from the pack reference audio.\n"
             "(Falling back to the recorded 'peon' backend.)",
             file=sys.stderr,
         )
         return speak_peon(text=text, verbose=verbose)
-
-    reference = ensure_reference(verbose=verbose)
-    out_path = out_path or os.path.join(CACHE_DIR, "_rocky_say.wav")
-    if verbose:
-        print(f"  synthesizing: \"{text}\"", file=sys.stderr)
-    tts = TTS("tts_models/multilingual/multi-dataset/xtts_v2")
-    tts.tts_to_file(text=text, speaker_wav=reference, language="en", file_path=out_path)
-    play(out_path)
-    return out_path
+    play(path)
+    return path
 
 
 # ══════════════════════════════════════════════════════════════════════════════

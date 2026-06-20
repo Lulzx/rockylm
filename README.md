@@ -67,13 +67,19 @@ obey the spec above.
 
 ---
 
+## Try it in your browser
+
+**[Lulzx.github.io/rockylm](https://Lulzx.github.io/rockylm)** — the trained 9M
+model runs entirely client-side via ONNX + WebAssembly. No server, no API key.
+The quantized model is **8.8 MB**.
+
 ## Quick start
 
 ```bash
 pip install torch tokenizers          # model
 # voice (peon backend) needs nothing extra; afplay/ffplay/aplay is used to play
 
-# 1. generate data + tokenizer, then train (~5 min on a T4)
+# 1. generate data + tokenizer, then train (~5 min on Apple Silicon / a T4)
 python -m rockylm prepare
 python -m rockylm train
 
@@ -83,11 +89,34 @@ python -m rockylm chat --speak
 python -m rockylm chat --speak --tts-backend xtts
 ```
 
-Single-shot:
+Single-shot (real output from the trained model):
+
+```text
+$ python -m rockylm chat --prompt "what kills the astrophage"
+predator eat astrophage. astrophage population stable. star not die.
+
+$ python -m rockylm chat --prompt "goodbye rocky"
+no understand word. goodbye. what mean. question. goodbye grace friend.
+```
+
+Export the trained model for the browser:
 
 ```bash
-python -m rockylm chat --prompt "what is astrophage"
+python tools/export_onnx.py     # -> docs/model.onnx (uint8) + docs/tokenizer.json
 ```
+
+## Talk to Rocky on Telegram
+
+A bot in [`bot/`](bot/) takes **voice notes**, transcribes them with Whisper,
+runs them through RockyLM, and replies with **both text and Rocky's voice**:
+
+```bash
+pip install -r bot/requirements.txt
+export TELEGRAM_BOT_TOKEN=...        # from @BotFather
+python bot/rocky_bot.py
+```
+
+See [`bot/README.md`](bot/README.md).
 
 ---
 
@@ -156,6 +185,8 @@ rockylm/
 ├── eval_cases.py      ← held-out Rocky test cases
 ├── inference.py       ← chat (+ --speak)
 ├── config.py model.py dataset.py train.py prepare_data.py   ← unchanged recipe
+bot/                   ← Telegram bot: voice note → RockyLM → text + voice
+docs/                  ← browser demo (ONNX + WASM), served on GitHub Pages
 STYLE.md               ← deep analysis of how Rocky talks (the spec)
 ```
 

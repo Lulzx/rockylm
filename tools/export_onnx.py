@@ -20,9 +20,9 @@ import sys
 
 import torch
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "rockylm"))
-from config import RockyConfig
-from model import RockyLM
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from rockylm.config import RockyConfig
+from rockylm.model import RockyLM
 
 
 def load_env():

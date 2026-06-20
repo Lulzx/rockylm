@@ -1,0 +1,7 @@
+# Rocky Telegram bot
+python-telegram-bot[all]>=20
+faster-whisper>=1.0
+torch
+tokenizers
+# optional neural voice clone (ROCKY_TTS=xtts):
+# TTS>=0.22
