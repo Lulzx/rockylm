@@ -22,6 +22,10 @@ from infer_pack.models import SynthesizerTrnMs768NSFsid
 from transformers import HubertModel
 
 DEVICE = "cpu"
+# CREPE 'tiny' is ~45x smaller than 'full' — huge CPU speedup, fine for a
+# character voice. Override with ROCKY_F0_MODEL=full for max pitch accuracy.
+F0_MODEL = os.environ.get("ROCKY_F0_MODEL", "tiny")
+torch.set_num_threads(os.cpu_count() or 4)
 _HUBERT = None
 
 
@@ -51,7 +55,7 @@ def load_net(pth):
 def get_f0(audio16k, p_len, f0_up=0):
     hop = 160  # 16k / 160 = 100 Hz frames (matches 2x-interpolated hubert feats)
     wav = torch.tensor(audio16k, dtype=torch.float32).unsqueeze(0)
-    f0 = torchcrepe.predict(wav, 16000, hop, 50, 1100, "full",
+    f0 = torchcrepe.predict(wav, 16000, hop, 50, 1100, F0_MODEL,
                             batch_size=512, device=DEVICE, pad=True)[0].cpu().numpy()
     f0 = np.nan_to_num(f0) * (2 ** (f0_up / 12))
     if len(f0) < p_len:
@@ -65,11 +69,21 @@ def get_f0(audio16k, p_len, f0_up=0):
     return coarse, f0.astype(np.float32)
 
 
+def _load16k(src):
+    """Fast mono 16k load: read native then soxr-lq resample (much faster than librosa default)."""
+    y, file_sr = sf.read(src, dtype="float32", always_2d=False)
+    if y.ndim > 1:
+        y = y.mean(axis=1)
+    if file_sr != 16000:
+        y = librosa.resample(y, orig_sr=file_sr, target_sr=16000, res_type="soxr_lq")
+    return np.ascontiguousarray(y, dtype=np.float32)
+
+
 def convert(src, dst, pth, transpose=0):
     net, sr = load_net(pth)
-    audio, _ = librosa.load(src, sr=16000, mono=True)
+    audio = _load16k(src)
     feats = torch.tensor(audio, dtype=torch.float32).unsqueeze(0).to(DEVICE)
-    with torch.no_grad():
+    with torch.inference_mode():
         h = hubert()(feats, output_hidden_states=True).hidden_states[12]   # [1,T,768]
         h = F.interpolate(h.permute(0, 2, 1), scale_factor=2).permute(0, 2, 1)
         p_len = h.shape[1]

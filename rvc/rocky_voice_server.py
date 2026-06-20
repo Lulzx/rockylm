@@ -15,9 +15,11 @@ Env: ROCKY_VOICE_PORT=8770, ROCKY_RVC_MODEL=~/rvc/models/rocky_voice.pth,
      ROCKY_RVC_TRANSPOSE=0, TINYTTS_SPEAKER=MALE
 """
 import glob
+import hashlib
 import os
 import sys
 import tempfile
+from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -50,21 +52,47 @@ def tinytts(text, out_wav):
     return cand[-1] if cand else None
 
 
+# text -> WAV cache. RockyLM emits a small set of distinct replies, so most
+# requests are repeats -> instant. Persists to disk so it survives restarts and
+# can be pre-warmed offline.
+CACHE_DIR = os.path.expanduser(os.environ.get("ROCKY_VOICE_CACHE_DIR", "~/rvc/cache"))
+os.makedirs(CACHE_DIR, exist_ok=True)
+_MEM = OrderedDict()
+_MEM_MAX = int(os.environ.get("ROCKY_VOICE_CACHE", "512"))
+
+
+def _key(text):
+    return hashlib.sha1(f"{TRANSPOSE}|{SPEAKER}|{text}".encode()).hexdigest()
+
+
 def say(text):
-    """text -> Rocky-voice WAV bytes."""
+    """text -> Rocky-voice WAV bytes (cached by text)."""
+    k = _key(text)
+    if k in _MEM:                                   # hot path: instant
+        _MEM.move_to_end(k)
+        return _MEM[k]
+    disk = os.path.join(CACHE_DIR, k + ".wav")
+    if os.path.exists(disk):                        # warm path: read from disk
+        with open(disk, "rb") as f:
+            wav = f.read()
+        _MEM[k] = wav
+        return wav
+
     base = tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name
-    rocky = tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name
     try:
         src = tinytts(text, base)
         if src is None:
             return b""
-        rvc_infer.convert(src, rocky, MODEL, TRANSPOSE)
-        with open(rocky, "rb") as f:
-            return f.read()
+        rvc_infer.convert(src, disk, MODEL, TRANSPOSE)   # synth straight to cache
+        with open(disk, "rb") as f:
+            wav = f.read()
     finally:
-        for p in (base, rocky):
-            if os.path.exists(p):
-                os.unlink(p)
+        if os.path.exists(base):
+            os.unlink(base)
+    _MEM[k] = wav
+    if len(_MEM) > _MEM_MAX:
+        _MEM.popitem(last=False)
+    return wav
 
 
 class Handler(BaseHTTPRequestHandler):
