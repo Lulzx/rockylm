@@ -25,8 +25,43 @@ DEVICE = "cpu"
 # CREPE 'tiny' is ~45x smaller than 'full' — huge CPU speedup, fine for a
 # character voice. Override with ROCKY_F0_MODEL=full for max pitch accuracy.
 F0_MODEL = os.environ.get("ROCKY_F0_MODEL", "tiny")
+# Run the heavy 48 kHz vocoder through ONNX Runtime when a synth ONNX is given
+# (static-int8 ~2.5x faster than ORT-fp32, ~3.3x faster than eager torch on ARM).
+# ROCKY_RVC_ONNX = path to .onnx, or "" to use eager torch.
+ONNX_PATH = os.path.expanduser(os.environ.get("ROCKY_RVC_ONNX", ""))
+NOISE_SCALE = float(os.environ.get("ROCKY_RVC_NOISE", "0.66667"))
 torch.set_num_threads(os.cpu_count() or 4)
 _HUBERT = None
+_ORT = {}
+_SR = {}
+
+
+def _ort_session(path):
+    import onnxruntime as ort
+    if path not in _ORT:
+        so = ort.SessionOptions()
+        so.intra_op_num_threads = os.cpu_count() or 4
+        so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        _ORT[path] = ort.InferenceSession(path, so, providers=["CPUExecutionProvider"])
+    return _ORT[path]
+
+
+def sr_of(pth):
+    """Output sample rate without building the (heavy) torch model."""
+    if pth not in _SR:
+        sr = torch.load(pth, map_location="cpu", weights_only=False)["sr"]
+        _SR[pth] = {"32k": 32000, "40k": 40000, "48k": 48000}.get(
+            sr, int(sr) if str(sr).isdigit() else 48000)
+    return _SR[pth]
+
+
+def warm(pth):
+    """Preload whichever vocoder backend is active (ORT or torch)."""
+    if ONNX_PATH:
+        _ort_session(ONNX_PATH)
+        sr_of(pth)
+    else:
+        load_net(pth)
 
 
 def hubert():
@@ -80,7 +115,6 @@ def _load16k(src):
 
 
 def convert(src, dst, pth, transpose=0):
-    net, sr = load_net(pth)
     audio = _load16k(src)
     feats = torch.tensor(audio, dtype=torch.float32).unsqueeze(0).to(DEVICE)
     with torch.inference_mode():
@@ -90,11 +124,26 @@ def convert(src, dst, pth, transpose=0):
         coarse, pitchf = get_f0(audio, p_len, transpose)
         p_len = min(p_len, len(coarse))
         h = h[:, :p_len].float()
-        pitch = torch.tensor(coarse[:p_len], dtype=torch.long).unsqueeze(0).to(DEVICE)
-        nsff0 = torch.tensor(pitchf[:p_len], dtype=torch.float32).unsqueeze(0).to(DEVICE)
-        lengths = torch.tensor([p_len], dtype=torch.long).to(DEVICE)
-        sid = torch.tensor([0], dtype=torch.long).to(DEVICE)
-        out = net.infer(h, lengths, pitch, nsff0, sid)[0][0, 0].cpu().numpy()
+
+        if ONNX_PATH:  # fast path: vocoder via ONNX Runtime
+            sr = sr_of(pth)
+            rnd = (np.random.standard_normal((1, 192, p_len)).astype(np.float32) * NOISE_SCALE)
+            feed = {
+                "phone": h.numpy().astype(np.float32),
+                "phone_lengths": np.array([p_len], dtype=np.int64),
+                "pitch": coarse[:p_len][None].astype(np.int64),
+                "nsff0": pitchf[:p_len][None].astype(np.float32),
+                "ds": np.array([0], dtype=np.int64),
+                "rnd": rnd,
+            }
+            out = _ort_session(ONNX_PATH).run(None, feed)[0].flatten()
+        else:          # eager torch
+            net, sr = load_net(pth)
+            pitch = torch.tensor(coarse[:p_len], dtype=torch.long).unsqueeze(0)
+            nsff0 = torch.tensor(pitchf[:p_len], dtype=torch.float32).unsqueeze(0)
+            lengths = torch.tensor([p_len], dtype=torch.long)
+            sid = torch.tensor([0], dtype=torch.long)
+            out = net.infer(h, lengths, pitch, nsff0, sid)[0][0, 0].cpu().numpy()
     sf.write(dst, out, sr)
     print(f"wrote {dst}  ({len(out)/sr:.2f}s @ {sr}Hz)")
 

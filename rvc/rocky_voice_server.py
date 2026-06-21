@@ -134,7 +134,7 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     print(f"Loading Rocky voice models (TinyTTS + ContentVec + {os.path.basename(MODEL)})...", flush=True)
     tts_engine()                # warm TinyTTS
-    rvc_infer.load_net(MODEL)   # warm RVC synthesizer
+    rvc_infer.warm(MODEL)       # warm RVC vocoder (ORT or torch)
     rvc_infer.hubert()          # warm ContentVec
     print(f"Rocky voice service on http://127.0.0.1:{PORT}  (POST /say, transpose={TRANSPOSE})", flush=True)
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
