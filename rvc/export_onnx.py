@@ -21,7 +21,7 @@ MODEL = os.path.expanduser(sys.argv[1] if len(sys.argv) > 1 else "~/rvc/models/r
 OUT = os.path.expanduser(sys.argv[2] if len(sys.argv) > 2 else "~/rvc/models/rocky_voice.onnx")
 
 cpt = torch.load(MODEL, map_location="cpu", weights_only=False)
-net = SynthesizerTrnMsNSFsidM(*cpt["config"], is_half=False)
+net = SynthesizerTrnMsNSFsidM(*cpt["config"], cpt.get("version", "v2"), is_half=False)
 net.load_state_dict(cpt["weight"], strict=False)
 net.eval()
 
