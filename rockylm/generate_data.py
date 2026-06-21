@@ -696,10 +696,26 @@ USER = {
 #  TOPIC HELPER (for simpler topics built from fixed line lists)
 # ══════════════════════════════════════════════════════════════════════════════
 
+_EMPH_TAGS = ["", "", "", "", f"{trip('good')}.", "question?", f"{trip('amaze')}.",
+              "you understand. question?", "rocky and grace. together we smart.",
+              "rocky fix.", "good. good day."]
+
+
 def _topic(user_msgs, rocky_templates, category):
-    """Helper: create a generator from user message list and rocky template list."""
+    """Generator from user messages + rocky lines, composed for diversity.
+
+    To avoid memorizing a small fixed set, each call may join a second distinct
+    line and/or an emphatic tag — multiplying the number of unique outputs while
+    staying in Rocky's short-declarative voice.
+    """
     def gen():
-        return _make_sample(pick(user_msgs), pick(rocky_templates), category)
+        body = pick(rocky_templates)
+        if len(rocky_templates) > 3 and random.random() < 0.45:
+            second = pick(rocky_templates)
+            if second != body:
+                body = f"{body} {second}"
+        body = join_sentences(body, pick(_EMPH_TAGS))
+        return _make_sample(pick(user_msgs), body, category)
     gen.__name__ = f"gen_{category}"
     return gen
 
@@ -946,7 +962,7 @@ def to_openai(s):
 #  MAIN
 # ══════════════════════════════════════════════════════════════════════════════
 
-def generate_dataset(n_samples=60000, eval_ratio=0.05):
+def generate_dataset(n_samples=120000, eval_ratio=0.05):
     # All topics get equal weight — single-turn only
     topics = [
         gen_greeting, gen_state, gen_friend, gen_science, gen_build, gen_sound,
@@ -1002,4 +1018,4 @@ def generate_dataset(n_samples=60000, eval_ratio=0.05):
 
 
 if __name__ == "__main__":
-    generate_dataset(60000)
+    generate_dataset(120000)
