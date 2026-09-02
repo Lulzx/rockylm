@@ -84,8 +84,9 @@ git clone https://github.com/Lulzx/rockylm && cd rockylm
 python -m venv .venv && source .venv/bin/activate    # Python 3.10+
 pip install -r requirements.txt                      # torch + tokenizers
 
-# 1. get the pre-trained weights (from the GitHub release, ~35 MB)
-python -m rockylm download
+# 1. get the pre-trained weights from the GitHub release
+python -m rockylm download                 # rockylm-9M  (35 MB, the examples above)
+python -m rockylm download rockylm-27M     # rockylm-27M (110 MB, better replies)
 
 # 2. chat — add --speak to hear Rocky's voice
 python -m rockylm chat
@@ -104,9 +105,10 @@ page, never in git:
 
 | asset | what |
 |---|---|
-| `rockylm-9M.pt` | PyTorch checkpoint, 6 layers / d=384, ~8.7M params (the model in the examples above) |
-| `config.json`, `tokenizer.json` | architecture + BPE tokenizer for that checkpoint |
-| `rockylm-9M.onnx` | uint8 ONNX export of the same model, used by the browser demo |
+| `rockylm-9M.pt` | PyTorch checkpoint, 6 layers / d=384, ~8.7M params, 10k steps |
+| `rockylm-27M.pt` | PyTorch checkpoint, 8 layers / d=512, ~27M params, 16k steps on 2x more diverse data |
+| `<name>.config.json`, `<name>.tokenizer.json` | architecture + BPE tokenizer for each checkpoint (the two models use different tokenizers) |
+| `rockylm-9M.onnx` | uint8 ONNX export of the 9M model, used by the browser demo |
 
 Pin a specific release with `ROCKYLM_RELEASE=v1.0.0 python -m rockylm download`.
 
@@ -117,10 +119,9 @@ python -m rockylm prepare      # generate 60k samples + train the BPE tokenizer
 python -m rockylm train        # ~25 min on Apple Silicon, faster on a GPU
 ```
 
-`rockylm/config.py` currently describes a larger 8-layer / d=512 model (~27M
-params); `train` builds whatever is in that file, and `chat` reads the
-architecture from `checkpoints/config.json`, so both sizes load with the same
-code. Use `--checkpoint` / `--tokenizer` on `chat` to point at other files.
+`rockylm/config.py` describes the 27M model; `train` builds whatever is in that
+file, and `chat` reads the architecture from `checkpoints/config.json`, so both
+released sizes load with the same code. Use `--checkpoint` / `--tokenizer` on `chat` to point at other files.
 
 Single-shot (real output from the trained model):
 

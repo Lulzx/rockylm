@@ -15,16 +15,17 @@ RELEASE_BASE = (f"https://github.com/{GITHUB_REPO}/releases/latest/download"
 def download_model(name="rockylm-9M"):
     """Download pre-trained RockyLM weights from the GitHub release.
 
-    Pass a different asset stem (e.g. `python -m rockylm download rockylm-27M`)
-    to fetch another checkpoint from the same release. Set ROCKYLM_RELEASE=vX.Y.Z
-    to pin a release tag instead of `latest`.
+    Models available: rockylm-9M (default, fast) and rockylm-27M (better).
+    `python -m rockylm download rockylm-27M` fetches the larger one. Each model
+    ships its own config + tokenizer (they were trained on different data).
+    Set ROCKYLM_RELEASE=vX.Y.Z to pin a release tag instead of `latest`.
     """
     import urllib.request
 
     files = [
         (f"{RELEASE_BASE}/{name}.pt", CHECKPOINT_PATH),
-        (f"{RELEASE_BASE}/config.json", "checkpoints/config.json"),
-        (f"{RELEASE_BASE}/tokenizer.json", TOKENIZER_PATH),
+        (f"{RELEASE_BASE}/{name}.config.json", "checkpoints/config.json"),
+        (f"{RELEASE_BASE}/{name}.tokenizer.json", TOKENIZER_PATH),
     ]
 
     print(f"Downloading {name} from github.com/{GITHUB_REPO} releases ({RELEASE_TAG})...\n")
@@ -51,6 +52,7 @@ def main():
         print("  python -m rockylm chat         Chat with Rocky  (add --speak for voice)")
         print("  python -m rockylm say TEXT     Speak text in Rocky's voice")
         print("  python -m rockylm download     Download pre-trained model from the GitHub release")
+        print("                                 (rockylm-9M by default; `download rockylm-27M` for the bigger one)")
         return
 
     cmd = sys.argv[1]
