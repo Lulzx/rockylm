@@ -49,6 +49,8 @@ def export_onnx(checkpoint_path, tokenizer_path, output_path, quantize=True, pus
     if os.path.exists(config_json):
         with open(config_json) as f:
             cfg = json.load(f)
+            if isinstance(cfg.get("model"), dict):   # train.py writes {"model": ..., "train": ...}
+                cfg = cfg["model"]
         config = RockyConfig(
             vocab_size=cfg.get("vocab_size", 4096),
             max_seq_len=cfg.get("max_position_embeddings", cfg.get("max_seq_len", 128)),

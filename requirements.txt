@@ -1,5 +1,12 @@
+# Core: chat / train / prepare
 torch>=2.0.0
 tokenizers>=0.19.0
-tqdm>=4.65.0
 numpy>=1.24.0
-datasets>=2.14.0
+tqdm>=4.65.0
+
+# Optional extras (uncomment what you need):
+# onnx onnxruntime            # tools/export_onnx.py (browser model)
+# huggingface_hub datasets    # tools/export_model.py, tools/export_dataset.py (HF push)
+# TTS                         # xtts voice backend
+# -r bot/requirements.txt     # Telegram bot (+ ffmpeg on PATH)
+# -r rvc/requirements.txt     # RVC Rocky voice service

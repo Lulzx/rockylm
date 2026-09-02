@@ -49,6 +49,7 @@ def _ort_session(path):
 def sr_of(pth):
     """Output sample rate without building the (heavy) torch model."""
     if pth not in _SR:
+        ensure_model(pth)
         sr = torch.load(pth, map_location="cpu", weights_only=False)["sr"]
         _SR[pth] = {"32k": 32000, "40k": 40000, "48k": 48000}.get(
             sr, int(sr) if str(sr).isdigit() else 48000)
@@ -75,8 +76,26 @@ def hubert():
 _NET = {}
 
 
+ROCKY_VOICE_URL = "https://pedramamini.com/dropbox/rocky_voice.pth"
+
+
+def ensure_model(pth):
+    """Download Pedram Amini's rocky_voice.pth (57 MB) if it isn't at `pth` yet."""
+    if os.path.exists(pth):
+        return pth
+    import urllib.request
+    os.makedirs(os.path.dirname(pth) or ".", exist_ok=True)
+    print(f"rocky_voice.pth not found at {pth}; downloading from {ROCKY_VOICE_URL} ...", flush=True)
+    tmp = pth + ".part"
+    urllib.request.urlretrieve(ROCKY_VOICE_URL, tmp)
+    os.replace(tmp, pth)
+    print(f"  saved {pth} ({os.path.getsize(pth) / 1e6:.0f} MB)")
+    return pth
+
+
 def load_net(pth):
     if pth not in _NET:
+        ensure_model(pth)
         cpt = torch.load(pth, map_location="cpu", weights_only=False)
         net = SynthesizerTrnMs768NSFsid(*cpt["config"], is_half=False)
         net.load_state_dict(cpt["weight"], strict=False)

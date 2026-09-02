@@ -29,6 +29,7 @@ PORT = int(os.environ.get("ROCKY_VOICE_PORT", "8770"))
 MODEL = os.path.expanduser(os.environ.get("ROCKY_RVC_MODEL", "~/rvc/models/rocky_voice.pth"))
 TRANSPOSE = int(os.environ.get("ROCKY_RVC_TRANSPOSE", "0"))
 SPEAKER = os.environ.get("TINYTTS_SPEAKER", "MALE")
+rvc_infer.ensure_model(MODEL)   # fetches rocky_voice.pth on first run
 
 _TTS = None
 

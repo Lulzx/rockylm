@@ -15,7 +15,7 @@ voice** — with speech bubbles for what you said and what he replied.
 **1. Start the relay** (serves RockyLM over HTTP — see [`../relay`](../relay)):
 
 ```bash
-python -m rockylm prepare && python -m rockylm train   # one-time: make a model
+python -m rockylm download                             # one-time: pre-trained weights
 python relay/server.py                                 # http://127.0.0.1:8765
 ```
 

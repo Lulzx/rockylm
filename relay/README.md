@@ -18,8 +18,8 @@ Pipeline: **Whisper** (faster-whisper) → **RockyLM** → **Rocky voice**
 ## Run
 
 ```bash
-pip install faster-whisper torch tokenizers     # + ffmpeg
-python -m rockylm prepare && python -m rockylm train
+pip install -r requirements.txt faster-whisper  # + ffmpeg
+python -m rockylm download                      # pre-trained weights from the GitHub release
 python relay/server.py                          # http://127.0.0.1:8765
 ```
 

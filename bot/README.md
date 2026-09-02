@@ -15,8 +15,8 @@ rocky 🔊       "Science time"          ← Rocky's recorded voice
 pip install -r bot/requirements.txt           # + ffmpeg on your PATH
 export TELEGRAM_BOT_TOKEN=...                  # from @BotFather
 
-# one-time: train a model so checkpoints/best_model.pt exists
-python -m rockylm prepare && python -m rockylm train
+# one-time: get the pre-trained model (or train: python -m rockylm prepare && python -m rockylm train)
+python -m rockylm download
 
 python bot/rocky_bot.py
 ```

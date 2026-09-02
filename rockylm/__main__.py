@@ -5,28 +5,38 @@ import sys
 
 CHECKPOINT_PATH = "checkpoints/best_model.pt"
 TOKENIZER_PATH = "data/tokenizer.json"
-HF_REPO = "arman-bd/rockylm-9M"
-HF_BASE = f"https://huggingface.co/{HF_REPO}/resolve/main"
+GITHUB_REPO = "Lulzx/rockylm"
+RELEASE_TAG = os.environ.get("ROCKYLM_RELEASE", "latest")
+RELEASE_BASE = (f"https://github.com/{GITHUB_REPO}/releases/latest/download"
+                if RELEASE_TAG == "latest"
+                else f"https://github.com/{GITHUB_REPO}/releases/download/{RELEASE_TAG}")
 
 
-def download_model():
-    """Download pre-trained RockyLM from HuggingFace."""
+def download_model(name="rockylm-9M"):
+    """Download pre-trained RockyLM weights from the GitHub release.
+
+    Pass a different asset stem (e.g. `python -m rockylm download rockylm-27M`)
+    to fetch another checkpoint from the same release. Set ROCKYLM_RELEASE=vX.Y.Z
+    to pin a release tag instead of `latest`.
+    """
     import urllib.request
 
     files = [
-        (f"{HF_BASE}/pytorch_model.bin", CHECKPOINT_PATH),
-        (f"{HF_BASE}/tokenizer.json", TOKENIZER_PATH),
-        (f"{HF_BASE}/config.json", "checkpoints/config.json"),
+        (f"{RELEASE_BASE}/{name}.pt", CHECKPOINT_PATH),
+        (f"{RELEASE_BASE}/config.json", "checkpoints/config.json"),
+        (f"{RELEASE_BASE}/tokenizer.json", TOKENIZER_PATH),
     ]
 
-    print(f"Downloading RockyLM from {HF_REPO}...\n")
+    print(f"Downloading {name} from github.com/{GITHUB_REPO} releases ({RELEASE_TAG})...\n")
     for url, dest in files:
         os.makedirs(os.path.dirname(dest), exist_ok=True)
-        name = os.path.basename(dest)
-        print(f"  {name}...", end=" ", flush=True)
-        urllib.request.urlretrieve(url, dest)
-        size_mb = os.path.getsize(dest) / 1e6
-        print(f"{size_mb:.1f} MB")
+        print(f"  {os.path.basename(dest)}...", end=" ", flush=True)
+        try:
+            urllib.request.urlretrieve(url, dest)
+        except Exception as e:
+            print(f"FAILED ({e})\n  url: {url}")
+            sys.exit(1)
+        print(f"{os.path.getsize(dest) / 1e6:.1f} MB")
 
     print("\nDone! Run: python -m rockylm chat")
 
@@ -40,7 +50,7 @@ def main():
         print("  python -m rockylm prepare      Generate data & train tokenizer")
         print("  python -m rockylm chat         Chat with Rocky  (add --speak for voice)")
         print("  python -m rockylm say TEXT     Speak text in Rocky's voice")
-        print("  python -m rockylm download     Download pre-trained model from HuggingFace")
+        print("  python -m rockylm download     Download pre-trained model from the GitHub release")
         return
 
     cmd = sys.argv[1]
@@ -55,10 +65,10 @@ def main():
         train()
 
     elif cmd == "download":
-        download_model()
+        download_model(*sys.argv[1:2])
 
     elif cmd == "chat":
-        if not os.path.exists(CHECKPOINT_PATH):
+        if not (os.path.exists(CHECKPOINT_PATH) and os.path.exists(TOKENIZER_PATH)):
             print("Model not found. Download the pre-trained model first:\n")
             print("  python -m rockylm download\n")
             print("Or train your own:\n")

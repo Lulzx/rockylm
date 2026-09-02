@@ -71,23 +71,56 @@ obey the spec above.
 
 **[Lulzx.github.io/rockylm](https://Lulzx.github.io/rockylm)** — the trained 9M
 model runs entirely client-side via ONNX + WebAssembly. No server, no API key.
-The quantized model is **8.8 MB**.
+The quantized model is **8.8 MB**. To run it locally:
+
+```bash
+cd docs && python -m http.server 8080     # then open http://localhost:8080
+```
 
 ## Quick start
 
 ```bash
-pip install torch tokenizers          # model
-# voice (peon backend) needs nothing extra; afplay/ffplay/aplay is used to play
+git clone https://github.com/Lulzx/rockylm && cd rockylm
+python -m venv .venv && source .venv/bin/activate    # Python 3.10+
+pip install -r requirements.txt                      # torch + tokenizers
 
-# 1. generate data + tokenizer, then train (~5 min on Apple Silicon / a T4)
-python -m rockylm prepare
-python -m rockylm train
+# 1. get the pre-trained weights (from the GitHub release, ~35 MB)
+python -m rockylm download
 
 # 2. chat — add --speak to hear Rocky's voice
 python -m rockylm chat
-python -m rockylm chat --speak
-python -m rockylm chat --speak --tts-backend xtts
+python -m rockylm chat --speak                       # recorded clips, no extra deps
+python -m rockylm chat --speak --tts-backend xtts    # needs `pip install TTS`
 ```
+
+`download` puts `checkpoints/best_model.pt`, `checkpoints/config.json` and
+`data/tokenizer.json` in place (all three are gitignored). The `--speak` backends
+use `afplay` / `ffplay` / `aplay`, whichever your system has.
+
+### Pre-trained weights
+
+All weights live on the **[GitHub Releases](https://github.com/Lulzx/rockylm/releases)**
+page, never in git:
+
+| asset | what |
+|---|---|
+| `rockylm-9M.pt` | PyTorch checkpoint, 6 layers / d=384, ~8.7M params (the model in the examples above) |
+| `config.json`, `tokenizer.json` | architecture + BPE tokenizer for that checkpoint |
+| `rockylm-9M.onnx` | uint8 ONNX export of the same model, used by the browser demo |
+
+Pin a specific release with `ROCKYLM_RELEASE=v1.0.0 python -m rockylm download`.
+
+### Train your own
+
+```bash
+python -m rockylm prepare      # generate 60k samples + train the BPE tokenizer
+python -m rockylm train        # ~25 min on Apple Silicon, faster on a GPU
+```
+
+`rockylm/config.py` currently describes a larger 8-layer / d=512 model (~27M
+params); `train` builds whatever is in that file, and `chat` reads the
+architecture from `checkpoints/config.json`, so both sizes load with the same
+code. Use `--checkpoint` / `--tokenizer` on `chat` to point at other files.
 
 Single-shot (real output from the trained model):
 
@@ -99,9 +132,10 @@ $ python -m rockylm chat --prompt "goodbye rocky"
 no understand word. goodbye. what mean. question. goodbye grace friend.
 ```
 
-Export the trained model for the browser:
+Export a trained model for the browser:
 
 ```bash
+pip install onnx onnxruntime
 python tools/export_onnx.py     # -> docs/model.onnx (uint8) + docs/tokenizer.json
 ```
 
@@ -111,7 +145,8 @@ A bot in [`bot/`](bot/) takes **voice notes**, transcribes them with Whisper,
 runs them through RockyLM, and replies with **both text and Rocky's voice**:
 
 ```bash
-pip install -r bot/requirements.txt
+pip install -r bot/requirements.txt  # + ffmpeg on your PATH
+python -m rockylm download           # if you haven't already
 export TELEGRAM_BOT_TOKEN=...        # from @BotFather
 python bot/rocky_bot.py
 ```
@@ -127,6 +162,7 @@ speech bubbles. He talks to RockyLM through the local [`relay/`](relay/) server
 companion, and any other client.
 
 ```bash
+pip install faster-whisper                # + ffmpeg; model via `python -m rockylm download`
 python relay/server.py                    # serve RockyLM at :8765
 cd mac-companion && ./fetch-sprites.sh && ./build.sh && ./.build/RockyCompanion
 ```
@@ -135,7 +171,9 @@ cd mac-companion && ./fetch-sprites.sh && ./build.sh && ./.build/RockyCompanion
 
 ## Giving Rocky a voice (TTS)
 
-`rockylm/tts.py` turns a reply into Rocky's voice. Two backends:
+`rockylm/tts.py` turns a reply into Rocky's voice. Two backends built in, plus a
+third (`rvc`, Rocky's trained voice on arbitrary text) that runs as a small
+service — see [`rvc/README.md`](rvc/README.md).
 
 ### `peon` — recorded voice (default, zero extra deps)
 
@@ -180,9 +218,9 @@ architecture.
 
 | | |
 |---|---|
-| **Parameters** | ~8.7M |
-| **Layers / dim / heads** | 6 / 384 / 6 |
-| **FFN** | 768 (ReLU) |
+| **Parameters** | ~8.7M (released `rockylm-9M`) · ~27M (current `config.py`) |
+| **Layers / dim / heads** | 6 / 384 / 6 · 8 / 512 / 8 |
+| **FFN** | 768 · 2048 (ReLU) |
 | **Vocab** | 4,096 (BPE) |
 | **Max sequence** | 128 tokens |
 | **Norm / Position** | LayerNorm / learned |
@@ -200,6 +238,9 @@ rockylm/
 ├── config.py model.py dataset.py train.py prepare_data.py   ← unchanged recipe
 bot/                   ← Telegram bot: voice note → RockyLM → text + voice
 relay/                 ← HTTP server (/audio, /health) fronting RockyLM
+rvc/                   ← Rocky's trained voice (TinyTTS → RVC) as a local service
+finetune/              ← optional: LoRA-tune Qwen3-0.6B on the same Rocky data
+tools/                 ← ONNX / HuggingFace export, Colab notebook generator
 mac-companion/         ← floating pixel-Rocky macOS app (mic → relay → voice)
 docs/                  ← browser demo (ONNX + WASM), served on GitHub Pages
 STYLE.md               ← deep analysis of how Rocky talks (the spec)

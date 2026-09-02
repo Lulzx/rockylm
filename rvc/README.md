@@ -15,16 +15,22 @@ text --TinyTTS (1.6M, generic)--> speech --RVC(rocky_voice.pth)--> Rocky voice
 
 ```bash
 python -m venv .venv && . .venv/bin/activate
-pip install torch torchaudio transformers torchcrepe librosa soundfile scipy tiny-tts
-export ROCKY_RVC_MODEL=~/rvc/models/rocky_voice.pth   # the trained model (57 MB)
+pip install -r rvc/requirements.txt
 python rvc/rocky_voice_server.py                       # POST /say text -> Rocky WAV
 ```
+
+On first run the server downloads `rocky_voice.pth` (57 MB, Pedram Amini's
+trained RVC v2 model, from <https://pedramamini.com/dropbox/rocky_voice.pth>)
+to `~/rvc/models/`. Point `ROCKY_RVC_MODEL` somewhere else to change that, or
+drop your own `.pth` there. ContentVec (`lengyue233/content-vec-best`) and
+CREPE weights are fetched by `transformers` / `torchcrepe` on first use.
 
 The Telegram bot uses it with `ROCKY_MODE=llm ROCKY_TTS=rvc ROCKY_VOICE_URL=http://127.0.0.1:8770`:
 RockyLM writes the reply text, this service speaks it in Rocky's voice.
 
 Env: `ROCKY_VOICE_PORT` (8770), `ROCKY_RVC_TRANSPOSE` (pitch shift, semitones),
-`TINYTTS_SPEAKER` (MALE/FEMALE). Model weights are not committed.
+`TINYTTS_SPEAKER` (MALE/FEMALE). Model weights are not committed; the RockyLM
+weights are on the GitHub release and `rocky_voice.pth` is auto-downloaded.
 
 Credit: RVC model code — RVC-Project (MIT); `rocky_voice.pth` — Pedram Amini's
 Rocky RVC training; ContentVec — lengyue233/content-vec-best.
