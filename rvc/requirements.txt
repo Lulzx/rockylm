@@ -1,0 +1,10 @@
+# Rocky voice service (TinyTTS -> RVC), fairseq-free
+torch
+torchaudio
+transformers
+torchcrepe
+librosa
+soundfile
+scipy
+tiny-tts
+onnxruntime   # optional: ORT int8 vocoder backend (rvc/export_onnx.py)
